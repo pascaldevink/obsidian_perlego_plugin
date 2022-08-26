@@ -152,21 +152,30 @@ class Perlego {
 				},
 			}
 
-			const metadata = await requestUrl(metadataRequest)
+			const metadataResult = await requestUrl(metadataRequest)
+			const metadata = metadataResult.json.data.results[0] 
 
 			// Put notes and highlights in note
-			let contents = `# ${metadata.json.data.results[0].title.mainTitle}\n\n` 
-			contents += `![](${metadata.json.data.results[0].imageLinks.coverThumbnail})\n`
+			const authors = metadata.contributors
+				.filter(contributor => contributor.type === 'author')
+				.map(contributor => contributor.name)
+			let title = metadata.title.mainTitle
+			if (metadata.title.subtitle !== "") {
+				title += `; ${metadata.title.subtitle}`
+			}
+
+			let contents = `# ${metadata.title.mainTitle}\n\n` 
+			contents += `![](${metadata.imageLinks.coverThumbnail})\n`
 			contents += `## Metadata\n`
-			contents += `- Author(s): ${metadata.json.data.results[0].contributors[0].name}\n` // @todo map and join authors
-			contents += `- Full title: ${metadata.json.data.results[0].title.mainTitle} ${metadata.json.data.results[0].title.subtitle}\n`
-			contents += `## Highlights\n\n`
+			contents += `- Author(s): ${authors.join(', ')}\n` // @todo map and join authors
+			contents += `- Full title: ${title}\n`
+			contents += `## Highlights\n`
 			contents += highlights.join("\n")
 			contents += `\n## Notes\n`
 			contents += notes.join("\n")
 
 			// Create new note in folder with book name
-			const fileName = 'Perlego/' + metadata.json.data.results[0].title.mainTitle + '.md'
+			const fileName = 'Perlego/' + metadata.title.mainTitle + '.md'
 
 			const exists = await this.app.vault.adapter.exists('Perlego');
 			if (!exists) {
