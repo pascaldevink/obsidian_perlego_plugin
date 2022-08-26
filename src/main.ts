@@ -27,7 +27,7 @@ export default class PerlegoPlugin extends Plugin {
 		// This adds a simple command that can be triggered anywhere
 		this.addCommand({
 			id: 'import-perlego-notes-and-highlights',
-			name: 'Perlego: import notes and highlights',
+			name: 'Import notes and highlights',
 			callback: () => {
 				new Perlego(this.app, this.settings.token).importNotesAndHighlights()
 			}
@@ -102,71 +102,78 @@ class Perlego {
 			},
 		}
 
-		requestUrl(booksRequest).then(response => {
-			const books = response.json.data
+		let response
+		try {
+			response = await requestUrl(booksRequest);
+		} catch (error) {
+			console.error(error)
+			return
+		}
+
+		const books = response.json.data
+
+		//
+		// Loop over books
+		//
+		books.forEach(async book => {
+			const bookId = book.bookId
 
 			//
-			// Loop over books
+			// Download notes and highlights using /ugc/v2/packaged-highlights
 			//
-			books.forEach(book => {
-				const bookId = book.bookId
+			const notesAndHighlightsRequest: RequestUrlParam = {
+				url: 'https://api.perlego.com/ugc/v2/packaged-highlights?book_id=' + bookId,
+				method: 'GET',
+				headers: {
+					'Authorization': 'Bearer ' + this.token,
+				},
+			}
 
-				//
-				// Download notes and highlights using /ugc/v2/packaged-highlights
-				//
-				const notesAndHighlightsRequest: RequestUrlParam = {
-					url: 'https://api.perlego.com/ugc/v2/packaged-highlights?book_id=' + bookId,
-					method: 'GET',
-					headers: {
-						'Authorization': 'Bearer ' + this.token,
-					},
-				}
-		
-				requestUrl(notesAndHighlightsRequest).then(async notesAndHighlights => {
-					if (notesAndHighlights.json.success === false || notesAndHighlights.json.data === null) {
-						// @todo log error
-						return
-					}
+			const notesAndHighlights = await requestUrl(notesAndHighlightsRequest)
+			if (notesAndHighlights.json.success === false || notesAndHighlights.json.data === null) {
+				// @todo log error
+				return
+			}
 
-					const highlights = notesAndHighlights.json.data.results
-						.map(result => '- ' + result.highlighted_text)
-					const notes = notesAndHighlights.json.data.results
-						.filter(result => result.notes.length > 0)
-						.flatMap(result => result.notes.map(note => note.text))
-						.filter(result => result.length > 0)
-						.map(result => '- ' + result)
+			const highlights = notesAndHighlights.json.data.results
+				.map(result => '- ' + result.highlighted_text)
+			const notes = notesAndHighlights.json.data.results
+				.filter(result => result.notes.length > 0)
+				.flatMap(result => result.notes.map(note => note.text))
+				.filter(result => result.length > 0)
+				.map(result => '- ' + result)
 
-					console.log(highlights)
+			// Grab the metadata for the book using /catalogue-service/v1/book
+			const metadataRequest: RequestUrlParam = {
+				url: 'https://api.perlego.com/catalogue-service/v1/book?book_id=' + bookId,
+				method: 'GET',
+				headers: {
+					'Authorization': 'Bearer ' + this.token,
+				},
+			}
 
-					// Grab the metadata for the book using /catalogue-service/v1/book
-					const metadataRequest: RequestUrlParam = {
-						url: 'https://api.perlego.com/catalogue-service/v1/book?book_id=' + bookId,
-						method: 'GET',
-						headers: {
-							'Authorization': 'Bearer ' + this.token,
-						},
-					}
+			const metadata = await requestUrl(metadataRequest)
 
-					requestUrl(metadataRequest).then(async metadata => {
-						// Put notes and highlights in note
-						let contents = `# ${metadata.json.data.results[0].title.mainTitle}\n\n` 
-						contents = contents + `## Highlights\n\n`
-						contents = contents + highlights.join("\n")
-						contents = contents + `## Notes\n`
-						contents = contents + notes.join("\n")
+			// Put notes and highlights in note
+			let contents = `# ${metadata.json.data.results[0].title.mainTitle}\n\n` 
+			contents += `![](${metadata.json.data.results[0].imageLinks.coverThumbnail})\n`
+			contents += `## Metadata\n`
+			contents += `- Author(s): ${metadata.json.data.results[0].contributors[0].name}\n` // @todo map and join authors
+			contents += `- Full title: ${metadata.json.data.results[0].title.mainTitle} ${metadata.json.data.results[0].title.subtitle}\n`
+			contents += `## Highlights\n\n`
+			contents += highlights.join("\n")
+			contents += `\n## Notes\n`
+			contents += notes.join("\n")
 
-						// Create new note in folder with book name
-						const fileName = 'Perlego/' + metadata.json.data.results[0].title.mainTitle + '.md'
+			// Create new note in folder with book name
+			const fileName = 'Perlego/' + metadata.json.data.results[0].title.mainTitle + '.md'
 
-						const exists = await this.app.vault.adapter.exists('Perlego');
-						if (!exists) {
-							await this.app.vault.adapter.mkdir('Perlego');
-						}
+			const exists = await this.app.vault.adapter.exists('Perlego');
+			if (!exists) {
+				await this.app.vault.adapter.mkdir('Perlego');
+			}
 
-						await this.app.vault.adapter.write(fileName, contents);
-					})
-				})
-			})
+			await this.app.vault.adapter.write(fileName, contents);
 		})
 	}
 }
