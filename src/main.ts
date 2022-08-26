@@ -1,6 +1,5 @@
-import { App, Plugin, PluginSettingTab, Setting, requestUrl, RequestUrlParam } from 'obsidian';
-import heredoc from 'tsheredoc';
-
+import { App, Plugin, PluginSettingTab, Setting, requestUrl, RequestUrlParam, Notice } from 'obsidian';
+import { StatusBar } from "./statusBar";
 interface PerlegoPluginSettings {
 	token: string;
 }
@@ -11,33 +10,31 @@ const DEFAULT_SETTINGS: PerlegoPluginSettings = {
 
 export default class PerlegoPlugin extends Plugin {
 	settings: PerlegoPluginSettings;
+	statusBar: StatusBar;
 
 	async onload() {
 		await this.loadSettings();
 
-		// Features:
-		// 1. Settings page to enter token
-		// 2. Command to import highlights and notes
-		// 3. Auto import every x hours
-
 		// This adds a status bar item to the bottom of the app. Does not work on mobile apps.
 		// const statusBarItemEl = this.addStatusBarItem();
 		// statusBarItemEl.setText('Status Bar Text');
+
+		// @ts-ignore
+		if (!this.app.isMobile) {
+			this.statusBar = new StatusBar(this.addStatusBarItem());
+		}
 
 		// This adds a simple command that can be triggered anywhere
 		this.addCommand({
 			id: 'import-perlego-notes-and-highlights',
 			name: 'Import notes and highlights',
 			callback: () => {
-				new Perlego(this.app, this.settings.token).importNotesAndHighlights()
+				new Perlego(this.app, this.settings.token, this.statusBar).importNotesAndHighlights()
 			}
 		});
 
 		// This adds a settings tab so the user can configure various aspects of the plugin
 		this.addSettingTab(new PerlegoSettingTab(this.app, this));
-
-		// When registering intervals, this function will automatically clear the interval when the plugin is disabled.
-		this.registerInterval(window.setInterval(() => console.log('setInterval'), 5 * 60 * 1000));
 	}
 
 	onunload() {
@@ -85,11 +82,27 @@ class Perlego {
 	constructor(
         private readonly app: App,
         private readonly token: string,
+		private readonly statusBar: StatusBar,
 	) {
 	}
 
+	notice(msg: string, show = false, timeout = 0, forcing: boolean = false) {
+		if (show) {
+		  new Notice(msg);
+		}
+		
+		// @ts-ignore
+		if (!this.app.isMobile) {
+		  this.statusBar.displayMessage(msg.toLowerCase(), timeout, forcing);
+		} else {
+		  if (!show) {
+			new Notice(msg);
+		  }
+		}
+	  }
+
 	async importNotesAndHighlights() {
-		console.log('importing!')
+		this.notice('Importing notes and highlights...', false, 10)
 
 		//
 		// Fetch all the books a user has interacted with using /book-activity/books. This returns book ids.
@@ -106,6 +119,7 @@ class Perlego {
 		try {
 			response = await requestUrl(booksRequest);
 		} catch (error) {
+			this.notice('Error downloading notes and highlights, is your token still valid?', true, 0, true)
 			console.error(error)
 			return
 		}
@@ -115,7 +129,10 @@ class Perlego {
 		//
 		// Loop over books
 		//
-		books.forEach(async book => {
+		this.notice("Saving files...", false, 30, true);
+
+		for (const key in books) {
+			const book = books[key];
 			const bookId = book.bookId
 
 			//
@@ -132,7 +149,7 @@ class Perlego {
 			const notesAndHighlights = await requestUrl(notesAndHighlightsRequest)
 			if (notesAndHighlights.json.success === false || notesAndHighlights.json.data === null) {
 				// @todo log error
-				return
+				continue
 			}
 
 			const highlights = notesAndHighlights.json.data.results
@@ -167,7 +184,7 @@ class Perlego {
 			let contents = `# ${metadata.title.mainTitle}\n\n` 
 			contents += `![](${metadata.imageLinks.coverThumbnail})\n`
 			contents += `## Metadata\n`
-			contents += `- Author(s): ${authors.join(', ')}\n` // @todo map and join authors
+			contents += `- Author(s): ${authors.join(', ')}\n`
 			contents += `- Full title: ${title}\n`
 			contents += `## Highlights\n`
 			contents += highlights.join("\n")
@@ -183,6 +200,8 @@ class Perlego {
 			}
 
 			await this.app.vault.adapter.write(fileName, contents);
-		})
+		}
+
+		this.notice('Notes and highlights imported', false, 30, true)
 	}
 }
