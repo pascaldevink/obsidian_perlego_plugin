@@ -15,10 +15,6 @@ export default class PerlegoPlugin extends Plugin {
 	async onload() {
 		await this.loadSettings();
 
-		// This adds a status bar item to the bottom of the app. Does not work on mobile apps.
-		// const statusBarItemEl = this.addStatusBarItem();
-		// statusBarItemEl.setText('Status Bar Text');
-
 		// @ts-ignore
 		if (!this.app.isMobile) {
 			this.statusBar = new StatusBar(this.addStatusBarItem());
